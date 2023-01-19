@@ -42,6 +42,7 @@ bencher = "0.1.5"
 walkdir = "2.3.2"         # automatically test things for all files in a directory
 rand = "0.8.5"            # used for fuzz testing
 rayon = "1.5.3"           # run tests for many files in parallel
+bytemuck = "1.12.3"
 
 
 [[bench]]

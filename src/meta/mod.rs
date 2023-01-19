@@ -406,7 +406,7 @@ impl MetaData {
     /// Validates the meta data and writes it to the stream.
     /// If pedantic, throws errors for files that may produce errors in other exr readers.
     /// Returns the automatically detected minimum requirement flags.
-    pub(crate) fn write_validating_to_buffered(write: &mut impl Write, headers: &[Header], pedantic: bool) -> Result<Requirements> {
+    pub fn write_validating_to_buffered(write: &mut impl Write, headers: &[Header], pedantic: bool) -> Result<Requirements> {
         // pedantic validation to not allow slightly invalid files
         // that still could be read correctly in theory
         let minimal_requirements = Self::validate(headers, pedantic)?;
