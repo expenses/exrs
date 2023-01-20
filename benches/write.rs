@@ -139,6 +139,33 @@ fn write_scanlines_interlaced_custom(bench: &mut Bencher) {
     })
 }
 
+fn write_scanlines_interlaced_custom_bgr(bench: &mut Bencher) {
+    let width = 3000;
+    let height = 3000;
+    let mut rgba = vec![0.0; width * height * 4];
+
+    for chunk in rgba.chunks_mut(4) {
+        chunk[0] = 0.2;
+        chunk[1] = 0.3;
+        chunk[2] = 0.6;
+    }
+
+    bench.iter(|| {
+        let mut rgba = bencher::black_box(rgba.clone());
+
+        deinterlace_rgba_rows_inplace(&mut rgba, width, height)  ;
+        let mut result = Vec::new();
+        write_exr_fast_bgr(
+            &mut result,
+            width as u32,
+            height as u32,
+            &rgba[..width * height * 3],
+        );
+        bencher::black_box(result);
+    })
+}
+
+
 fn write_scanlines_specificchannels(bench: &mut Bencher) {
     let width = 3000;
     let height = 3000;
@@ -364,6 +391,81 @@ fn write_exr_fast<W: Write>(
     }
 }
 
+
+fn write_exr_fast_bgr<W: Write>(
+    output: &mut W,
+    width: u32,
+    height: u32,
+    bgr: &[f32],
+) {
+    let mut output_vec = Vec::new();
+
+    let size = exr::math::Vec2(width as usize, height as usize);
+
+    let num_channels = 3;
+    let subpixel_width = 4;
+    let pixel_width = num_channels * subpixel_width;
+
+    let header = exr::meta::header::Header {
+        channels: exr::meta::attribute::ChannelList::new(
+            smallvec::smallvec![
+                exr::meta::attribute::ChannelDescription::named(
+                    "B",
+                    exr::meta::attribute::SampleType::F32
+                ),
+                exr::meta::attribute::ChannelDescription::named(
+                    "G",
+                    exr::meta::attribute::SampleType::F32
+                ),
+                exr::meta::attribute::ChannelDescription::named(
+                    "R",
+                    exr::meta::attribute::SampleType::F32
+                ),
+            ]
+            .into(),
+        ),
+        compression: exr::compression::Compression::Uncompressed,
+        blocks: exr::meta::BlockDescription::ScanLines,
+        line_order: exr::meta::attribute::LineOrder::Increasing,
+        layer_size: size,
+        deep: false,
+        deep_data_version: None,
+        chunk_count: height as usize,
+        max_samples_per_pixel: None,
+        shared_attributes: exr::meta::header::ImageAttributes::with_size(size),
+        own_attributes: Default::default(),
+    };
+
+    exr::meta::MetaData::write_validating_to_buffered(&mut output_vec, &[header], true).unwrap();
+
+    output.write_all(&output_vec).unwrap();
+
+    let mut offset_tables = Vec::with_capacity(height as usize);
+
+    let base_offset = output_vec.len() as u64 + height as u64 * 8;
+
+    drop(output_vec);
+
+    for i in 0..height as u64 {
+        offset_tables.push(base_offset as u64 + i * ((width * pixel_width) + 8) as u64);
+    }
+
+    output.write_all(bytemuck::cast_slice(&offset_tables));
+
+    for y in 0..height {
+        output.write_all(&y.to_le_bytes());
+        output.write_all(&(width * pixel_width).to_le_bytes());
+
+        let y = y as usize;
+        let width = width as usize;
+
+        output.write_all(bytemuck::cast_slice(
+            &bgr[y * width * 3..(y + 1) * width * 3],
+        ));
+    }
+}
+
+
 benchmark_group!(write,
     write_parallel_any_channels_to_buffered,
     write_nonparallel_zip1_to_buffered,
@@ -375,6 +477,26 @@ benchmark_group!(write,
     write_scanlines_interlaced_anychannels,
     write_scanlines_deinterlaced_anychannels,
     write_scanlines_specificchannels,
+    write_scanlines_interlaced_custom_bgr,
 );
 
 benchmark_main!(write);
+
+fn deinterlace_rgba_rows_inplace(rgba: &mut [f32], width: usize, height: usize) {
+    let mut row = vec![0.0; width * 3];
+
+    for y in 0 .. height {
+        let mut i = 0;
+        {
+            let input = &rgba[y * width * 4 .. (y + 1) * width * 4];
+            let (mut blue, mut remaining) = row.split_at_mut(width);
+            let (mut green, mut red) = remaining.split_at_mut(width);
+            for (((chunk, red), green), blue) in input.chunks_exact(4).zip(red).zip(green).zip(blue) {
+                *red = chunk[0];
+                *green = chunk[1];
+                *blue = chunk[2];
+            }
+        }
+        rgba[y * width * 3..(y +1) * width * 3].copy_from_slice(&row);
+    }
+}
