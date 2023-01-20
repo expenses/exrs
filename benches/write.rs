@@ -75,19 +75,23 @@ fn write_uncompressed_to_buffered(bench: &mut Bencher) {
 fn write_scanlines_deinterlaced_custom(bench: &mut Bencher) {
     let width = 3000;
     let height = 3000;
-    let red = bencher::black_box(vec![0.2; width * height]);
-    let green = bencher::black_box(vec![0.3; width * height]);
-    let blue = bencher::black_box(vec![0.6; width * height]);
+    let red = vec![0.2; width * height];
+    let green = vec![0.3; width * height];
+    let blue = vec![0.6; width * height];
 
     bench.iter(|| {
+        let red = bencher::black_box(red.clone());
+        let green = bencher::black_box(green.clone());
+        let blue = bencher::black_box(blue.clone());
+
         let mut result = Vec::new();
         write_exr_fast(
             &mut result,
             width as u32,
             height as u32,
-            bencher::black_box(&red),
-            bencher::black_box(&green),
-            bencher::black_box(&blue),
+            &red,
+            &green,
+            &blue,
         );
         bencher::black_box(result);
     })
@@ -104,11 +108,13 @@ fn write_scanlines_interlaced_custom(bench: &mut Bencher) {
         chunk[2] = 0.6;
     }
 
-    let mut red = vec![0.0; width * height];
-    let mut green = vec![0.0; width * height];
-    let mut blue = vec![0.0; width * height];
-
     bench.iter(|| {
+        let rgba = bencher::black_box(rgba.clone());
+
+        let mut red = vec![0.0; width * height];
+        let mut green = vec![0.0; width * height];
+        let mut blue = vec![0.0; width * height];    
+
         for (((chunk, red), green), blue) in bencher::black_box(&rgba)
             .chunks_exact(4)
             .zip(&mut red)
@@ -144,28 +150,28 @@ fn write_scanlines_specificchannels(bench: &mut Bencher) {
         chunk[2] = 0.6;
     }
 
-    let size = Vec2(width as usize, height as usize);
-
-    let layer1 = Layer::new(
-        size,
-        LayerAttributes::default(),
-        Encoding::UNCOMPRESSED,
-        SpecificChannels::rgb(|pos: Vec2<usize>| {
-            let offset = (pos.y() * width as usize + pos.x()) * 4;
-
-            (rgba[offset], rgba[offset + 1], rgba[offset + 2])
-        }),
-    );
-
-    // define the visible area of the canvas
-    let attributes = ImageAttributes::new(
-        // the pixel section that should be shown
-        IntegerBounds::from_dimensions(size),
-    );
-
-    let image = Image::empty(attributes).with_layer(layer1); // add an rgba layer of different type, `SpecificChannels<ClosureB>`, not possible with a vector
-
     bench.iter(|| {
+        let size = Vec2(width as usize, height as usize);
+
+        let layer1 = Layer::new(
+            size,
+            LayerAttributes::default(),
+            Encoding::UNCOMPRESSED,
+            SpecificChannels::rgb(|pos: Vec2<usize>| {
+                let offset = (pos.y() * width as usize + pos.x()) * 4;
+
+                (rgba[offset], rgba[offset + 1], rgba[offset + 2])
+            }),
+        );
+
+        // define the visible area of the canvas
+        let attributes = ImageAttributes::new(
+            // the pixel section that should be shown
+            IntegerBounds::from_dimensions(size),
+        );
+
+        let image = Image::empty(attributes).with_layer(layer1); // add an rgba layer of different type, `SpecificChannels<ClosureB>`, not possible with a vector
+
         let mut result = Vec::new();
         image.write().to_buffered(Cursor::new(&mut result)).unwrap();
         bencher::black_box(result);
@@ -178,15 +184,19 @@ fn write_scanlines_deinterlaced_anychannels(bench: &mut Bencher) {
 
     let size = Vec2(width as usize, height as usize);
 
-    let red = bencher::black_box(vec![0.2; width * height]);
-    let green = bencher::black_box(vec![0.3; width * height]);
-    let blue = bencher::black_box(vec![0.6; width * height]);
-
-    let red_s = exr::image::FlatSamples::F32(red);
-    let green_s = exr::image::FlatSamples::F32(green);
-    let blue_s = exr::image::FlatSamples::F32(blue);
+    let red = vec![0.2; width * height];
+    let green = vec![0.3; width * height];
+    let blue = vec![0.6; width * height];
 
     bench.iter(|| {
+        let red = bencher::black_box(red.clone());
+        let green = bencher::black_box(green.clone());
+        let blue = bencher::black_box(blue.clone());
+
+        let red_s = exr::image::FlatSamples::F32(red);
+        let green_s = exr::image::FlatSamples::F32(green);
+        let blue_s = exr::image::FlatSamples::F32(blue);
+
         // define the visible area of the canvas
         let attributes = ImageAttributes::new(
             // the pixel section that should be shown
@@ -198,9 +208,9 @@ fn write_scanlines_deinterlaced_anychannels(bench: &mut Bencher) {
             LayerAttributes::default(),
             Encoding::UNCOMPRESSED,
             exr::image::AnyChannels::sort(smallvec::smallvec![
-                exr::image::AnyChannel::new("R", &red_s),
-                exr::image::AnyChannel::new("G", &green_s),
-                exr::image::AnyChannel::new("B", &blue_s),
+                exr::image::AnyChannel::new("R", red_s),
+                exr::image::AnyChannel::new("G", green_s),
+                exr::image::AnyChannel::new("B", blue_s),
             ]),
         );
 
@@ -226,36 +236,27 @@ fn write_scanlines_interlaced_anychannels(bench: &mut Bencher) {
         chunk[2] = 0.6;
     }
 
-    let mut red_s = exr::image::FlatSamples::F32(vec![0.0; width * height]);
-    let mut green_s = exr::image::FlatSamples::F32(vec![0.0; width * height]);
-    let mut blue_s = exr::image::FlatSamples::F32(vec![0.0; width * height]);
-
     bench.iter(|| {
-        {
-            let red = match &mut red_s {
-                exr::image::FlatSamples::F32(ref mut s) => s,
-                _ => panic!(),
-            };
-            let green = match &mut green_s {
-                exr::image::FlatSamples::F32(ref mut s) => s,
-                _ => panic!(),
-            };
-            let blue = match &mut blue_s {
-                exr::image::FlatSamples::F32(ref mut s) => s,
-                _ => panic!(),
-            };
+        let rgba = bencher::black_box(rgba.clone());
 
-            for (((chunk, red), green), blue) in bencher::black_box(&rgba)
-                .chunks_exact(4)
-                .zip(red)
-                .zip(green)
-                .zip(blue)
-            {
-                *red = chunk[0];
-                *green = chunk[1];
-                *blue = chunk[2];
-            }
+        let mut red = vec![0.0; width * height];
+        let mut green = vec![0.0; width * height];
+        let mut blue = vec![0.0; width * height];    
+
+        for (((chunk, red), green), blue) in bencher::black_box(&rgba)
+            .chunks_exact(4)
+            .zip(&mut red)
+            .zip(&mut green)
+            .zip(&mut blue)
+        {
+            *red = chunk[0];
+            *green = chunk[1];
+            *blue = chunk[2];
         }
+
+        let red_s = exr::image::FlatSamples::F32(red);
+        let green_s = exr::image::FlatSamples::F32(green);
+        let blue_s = exr::image::FlatSamples::F32(blue);
 
         // define the visible area of the canvas
         let attributes = ImageAttributes::new(
