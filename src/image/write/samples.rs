@@ -26,6 +26,25 @@ pub trait WritableSamples<'slf> {
     fn create_samples_writer(&'slf self, header: &Header) -> Self::Writer;
 }
 
+impl<'a, T: WritableSamples<'a>> WritableSamples<'a> for &'_ T {
+    fn sample_type(&self) -> SampleType {
+        T::sample_type(self)
+    }
+
+    /// Generate the file meta data regarding resolution levels
+    fn infer_level_modes(&self) -> (LevelMode, RoundingMode) {
+        T::infer_level_modes(self)
+    }
+
+    /// The type of the temporary writer for this sample storage
+    type Writer = T::Writer;
+
+    /// Create a temporary writer for this sample storage
+    fn create_samples_writer(&'a self, header: &Header) -> Self::Writer {
+        T::create_samples_writer(self, header)
+    }
+}
+
 /// Enable an image with this single level sample grid to be written to a file.
 /// Only contained within `Levels`.
 pub trait WritableLevel<'slf> {

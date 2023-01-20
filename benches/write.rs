@@ -60,16 +60,19 @@ fn write_parallel_zip16_to_buffered(bench: &mut Bencher) {
 fn write_uncompressed_to_buffered(bench: &mut Bencher) {
     let path = "tests/images/valid/custom/crowskull/crow_uncompressed.exr";
     let image = read_all_flat_layers_from_file(path).unwrap();
-    assert!(image.layer_data.iter().all(|layer| layer.encoding.compression == Compression::Uncompressed));
+    assert!(image
+        .layer_data
+        .iter()
+        .all(|layer| layer.encoding.compression == Compression::Uncompressed));
 
-    bench.iter(||{
+    bench.iter(|| {
         let mut result = Vec::new();
         image.write().to_buffered(Cursor::new(&mut result)).unwrap();
         bencher::black_box(result);
     })
 }
 
-fn write_scanlines_deinterlaced(bench: &mut Bencher) {
+fn write_scanlines_deinterlaced_custom(bench: &mut Bencher) {
     let width = 3000;
     let height = 3000;
     let red = bencher::black_box(vec![0.2; width * height]);
@@ -90,7 +93,7 @@ fn write_scanlines_deinterlaced(bench: &mut Bencher) {
     })
 }
 
-fn write_scanlines_interlaced(bench: &mut Bencher) {
+fn write_scanlines_interlaced_custom(bench: &mut Bencher) {
     let width = 3000;
     let height = 3000;
     let mut rgba = vec![0.0; width * height * 4];
@@ -101,17 +104,20 @@ fn write_scanlines_interlaced(bench: &mut Bencher) {
         chunk[2] = 0.6;
     }
 
-    bench.iter(|| {
-        let mut red = vec![0.0; width * height];
-        let mut green = vec![0.0; width * height];
-        let mut blue = vec![0.0; width * height];
+    let mut red = vec![0.0; width * height];
+    let mut green = vec![0.0; width * height];
+    let mut blue = vec![0.0; width * height];
 
-        let mut i = 0;
-        for chunk in bencher::black_box(&rgba).chunks(4) {
-            red[i] = chunk[0];
-            green[i] = chunk[1];
-            blue[i] = chunk[2];
-            i += 1;
+    bench.iter(|| {
+        for (((chunk, red), green), blue) in bencher::black_box(&rgba)
+            .chunks_exact(4)
+            .zip(&mut red)
+            .zip(&mut green)
+            .zip(&mut blue)
+        {
+            *red = chunk[0];
+            *green = chunk[1];
+            *blue = chunk[2];
         }
 
         let mut result = Vec::new();
@@ -127,7 +133,7 @@ fn write_scanlines_interlaced(bench: &mut Bencher) {
     })
 }
 
-fn write_scanlines_normal(bench: &mut Bencher) {
+fn write_scanlines_specificchannels(bench: &mut Bencher) {
     let width = 3000;
     let height = 3000;
     let mut rgba = vec![0.0; width * height * 4];
@@ -147,21 +153,129 @@ fn write_scanlines_normal(bench: &mut Bencher) {
         SpecificChannels::rgb(|pos: Vec2<usize>| {
             let offset = (pos.y() * width as usize + pos.x()) * 4;
 
-            (rgba[offset], rgba[offset +1], rgba[offset+2])
-})
+            (rgba[offset], rgba[offset + 1], rgba[offset + 2])
+        }),
     );
 
     // define the visible area of the canvas
     let attributes = ImageAttributes::new(
         // the pixel section that should be shown
-        IntegerBounds::from_dimensions(size)
+        IntegerBounds::from_dimensions(size),
     );
 
-
-    let image = Image::empty(attributes)
-        .with_layer(layer1); // add an rgba layer of different type, `SpecificChannels<ClosureB>`, not possible with a vector
+    let image = Image::empty(attributes).with_layer(layer1); // add an rgba layer of different type, `SpecificChannels<ClosureB>`, not possible with a vector
 
     bench.iter(|| {
+        let mut result = Vec::new();
+        image.write().to_buffered(Cursor::new(&mut result)).unwrap();
+        bencher::black_box(result);
+    })
+}
+
+fn write_scanlines_deinterlaced_anychannels(bench: &mut Bencher) {
+    let width = 3000;
+    let height = 3000;
+
+    let size = Vec2(width as usize, height as usize);
+
+    let red = bencher::black_box(vec![0.2; width * height]);
+    let green = bencher::black_box(vec![0.3; width * height]);
+    let blue = bencher::black_box(vec![0.6; width * height]);
+
+    let red_s = exr::image::FlatSamples::F32(red);
+    let green_s = exr::image::FlatSamples::F32(green);
+    let blue_s = exr::image::FlatSamples::F32(blue);
+
+    bench.iter(|| {
+        // define the visible area of the canvas
+        let attributes = ImageAttributes::new(
+            // the pixel section that should be shown
+            IntegerBounds::from_dimensions(size),
+        );
+
+        let layer1 = Layer::new(
+            size,
+            LayerAttributes::default(),
+            Encoding::UNCOMPRESSED,
+            exr::image::AnyChannels::sort(smallvec::smallvec![
+                exr::image::AnyChannel::new("R", &red_s),
+                exr::image::AnyChannel::new("G", &green_s),
+                exr::image::AnyChannel::new("B", &blue_s),
+            ]),
+        );
+
+        let image = Image::empty(attributes).with_layer(layer1); // add an rgba layer of different type, `SpecificChannels<ClosureB>`, not possible with a vector
+
+        let mut result = Vec::new();
+        image.write().to_buffered(Cursor::new(&mut result)).unwrap();
+        bencher::black_box(result);
+    })
+}
+
+fn write_scanlines_interlaced_anychannels(bench: &mut Bencher) {
+    let width = 3000;
+    let height = 3000;
+
+    let size = Vec2(width as usize, height as usize);
+
+    let mut rgba = vec![0.0_f32; width * height * 4];
+
+    for chunk in rgba.chunks_mut(4) {
+        chunk[0] = 0.2;
+        chunk[1] = 0.3;
+        chunk[2] = 0.6;
+    }
+
+    let mut red_s = exr::image::FlatSamples::F32(vec![0.0; width * height]);
+    let mut green_s = exr::image::FlatSamples::F32(vec![0.0; width * height]);
+    let mut blue_s = exr::image::FlatSamples::F32(vec![0.0; width * height]);
+
+    bench.iter(|| {
+        {
+            let red = match &mut red_s {
+                exr::image::FlatSamples::F32(ref mut s) => s,
+                _ => panic!(),
+            };
+            let green = match &mut green_s {
+                exr::image::FlatSamples::F32(ref mut s) => s,
+                _ => panic!(),
+            };
+            let blue = match &mut blue_s {
+                exr::image::FlatSamples::F32(ref mut s) => s,
+                _ => panic!(),
+            };
+
+            for (((chunk, red), green), blue) in bencher::black_box(&rgba)
+                .chunks_exact(4)
+                .zip(red)
+                .zip(green)
+                .zip(blue)
+            {
+                *red = chunk[0];
+                *green = chunk[1];
+                *blue = chunk[2];
+            }
+        }
+
+        // define the visible area of the canvas
+        let attributes = ImageAttributes::new(
+            // the pixel section that should be shown
+            IntegerBounds::from_dimensions(size),
+        );
+
+        let layer1 = Layer::new(
+            size,
+            LayerAttributes::default(),
+            Encoding::UNCOMPRESSED,
+            exr::image::AnyChannels::sort(smallvec::smallvec![
+                exr::image::AnyChannel::new("R", &red_s),
+                exr::image::AnyChannel::new("G", &green_s),
+                exr::image::AnyChannel::new("B", &blue_s),
+            ]),
+        );
+
+        let image = Image::empty(attributes).with_layer(layer1); // add an rgba layer of different type, `SpecificChannels<ClosureB>`, not possible with a vector
+
         let mut result = Vec::new();
         image.write().to_buffered(Cursor::new(&mut result)).unwrap();
         bencher::black_box(result);
@@ -255,9 +369,11 @@ benchmark_group!(write,
     write_parallel_zip1_to_buffered,
     write_parallel_zip16_to_buffered,
     write_uncompressed_to_buffered,
-    write_scanlines_deinterlaced,
-    write_scanlines_interlaced,
-    write_scanlines_normal,
+    write_scanlines_deinterlaced_custom,
+    write_scanlines_interlaced_custom,
+    write_scanlines_interlaced_anychannels,
+    write_scanlines_deinterlaced_anychannels,
+    write_scanlines_specificchannels,
 );
 
 benchmark_main!(write);
